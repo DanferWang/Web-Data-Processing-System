@@ -1,5 +1,5 @@
 import gzip
-import html5lib
+import lxml
 import json
 import re
 from warcio.archiveiterator import ArchiveIterator
@@ -21,7 +21,7 @@ def find_labels(payload):
         #print(key)
         content = payload.content_stream().read()
         #print(content)
-        soup = BeautifulSoup(content, "html5lib")
+        soup = BeautifulSoup(content, "lxml")
         text_list = [clean_text(text) for text in soup.stripped_strings]
         text_set = set(text_list)
         text_list = list(text_set)
