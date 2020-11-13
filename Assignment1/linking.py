@@ -16,7 +16,7 @@ def similarity(text, descriptions):
     #except:
         #exc = "invalid text HTML"
         #return exc
-        
+
 def search(query):
     e = Elasticsearch()
     p = { "query" : { "query_string" : { "query" : query }}}
@@ -55,4 +55,4 @@ if __name__ == '__main__':
             if mylist:
                 html_text = " ".join(rec_text[i])
                 print(i + " " + k + " " + similarity(html_text, mylist))
-  
+
