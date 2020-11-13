@@ -21,20 +21,23 @@ def clean_text(text):
 
 
 # the key_text is the output of record_id and text in dict
-def html_text(payload):
+def html_text(key_text, payload):
     if payload.rec_type == 'response':
         key = payload.rec_headers.get_header(KEYNAME)
-        # print(key)
         content = payload.content_stream().read()
-        # print(content)
         soup = BeautifulSoup(content, "lxml")
         text_list = [clean_text(text) for text in soup.stripped_strings]
         text_set = set(text_list)
         text_list = list(text_set)
         text_list = list(filter(None, text_list))
         key_text[key] = text_list
-        # print(json.dumps(key_text,indent=2))
         return key_text
+
+def read_warc(warcRaw):
+    recID_text = {}
+    for record in ArchiveIterator(warcRaw):
+        recID_text = html_text(recID_text, record)
+    return recID_text
 
     # Problem 2: Let's assume that we found a way to retrieve the text from a webpage. How can we recognize the
     # entities in the text?
@@ -63,16 +66,24 @@ model = 'i2b2_2014_glove_spacy_bioes'
 # 'mimic_glove_spacy_bioes'
 # 'mimic_glove_stanford_bioes'
 
+with HiddenPrints():
+    neuromodel.fetch_data(dataset)
+    neuromodel.fetch_model(model)
+    nn = neuromodel.NeuroNER(train_model=False, use_pretrained_model=True)
+
 # detect entities
 def entity_detect(sentence):
     # print("Building model")
-    with HiddenPrints():
-        neuromodel.fetch_data(dataset)
-        neuromodel.fetch_model(model)
-        nn = neuromodel.NeuroNER(train_model=False, use_pretrained_model=True)
-
     entities = nn.predict(sentence)
     return entities
+
+def entitis_dict(key_text):
+    recID_entities = {}
+    for rec_id in key_text.keys():
+        text = ' '
+        strxNew = text.join(key_text.get(rec_id))
+        recID_entities[rec_id] = entity_detect(strxNew)
+    return recID_entities
 
     # Problem 3: We now have to disambiguate the entities in the text. For instance, let's assugme that we identified
     # the entity "Michael Jordan". Which entity in Wikidata is the one that is referred to in the text?
@@ -112,6 +123,18 @@ def search(query):
             id_labels.setdefault(id, set()).add(str(label) + " " + str(description))
     return id_labels
 
+def ent_link(key_text, recID_entities):
+    for rec_id in recID_entities.keys():
+        page_id = rec_id.split(":")[2].replace(">", "")
+        for ent in recID_entities.get(rec_id):
+            QUERY = ent
+            label_description = []
+            for entity in search(QUERY).keys():
+                label_description.append([entity, str(search(QUERY)[entity])])
+            if label_description:
+                html_text = " ".join(key_text[rec_id])
+                print(page_id + "\t" + ent + "\t" + similarity(html_text, label_description))
+
     # To tackle this problem, you have access to two tools that can be useful. The first is a SPARQL engine (Trident)
     # with a local copy of Wikidata. The file "test_sparql.py" shows how you can execute SPARQL queries to retrieve
     # valuable knowledge. Please be aware that a SPARQL engine is not the best tool in case you want to lookup for
@@ -147,24 +170,10 @@ if __name__ == '__main__':
     KEYNAME = "WARC-Record-ID"
     key_text = {}
     with gzip.open(INPUT, 'rt', errors='ignore') as warcRaw:
-        for record in ArchiveIterator(warcRaw):
-            html_text(record)
+        read_warc(warcRaw)
 
     # detect entities and save in recID_entities
-    recID_entities = {}
-    for rec_id in key_text.keys():
-        text = ' '
-        strxNew = text.join(key_text.get(rec_id))
-        recID_entities[rec_id] = entity_detect(strxNew)
+    recID_entities = entitis_dict(key_text)
 
     # linking
-    for rec_id in recID_entities.keys():
-        sp = rec_id.split(":")[2].replace(">", "")
-        for ent in recID_entities.get(rec_id):
-            QUERY = ent
-            label_description = []
-            for entity in search(QUERY).keys():
-                label_description.append([entity, str(search(QUERY)[entity])])
-            if label_description:
-                html_text = " ".join(key_text[rec_id])
-                print(sp + " " + ent + " " + similarity(html_text, label_description))
+    ent_link(key_text, recID_entities)
