@@ -5,14 +5,11 @@ import re
 import math
 import os, sys
 import warnings
-import pandas as pd
 import nltk
 from warcio.archiveiterator import ArchiveIterator
 from bs4 import BeautifulSoup
-from urllib.parse import urlparse
 from elasticsearch import Elasticsearch
 from multiprocessing import Pool, cpu_count
-
 
 warnings.filterwarnings('ignore')
 
@@ -21,15 +18,17 @@ nltk.download('maxent_ne_chunker')
 nltk.download('words')
 nltk.download('punkt')
 
+
 # Problem 1: The webpage is typically encoded in HTML format.
-# We should get rid of the HTML tags and retrieve the text. How can we do it?
+# We use beautiful soup to extract from html, and refine the raw text.
 
-
+# Only textual content shown in html is considered to process. Remove HTML head, CSS style, JavaScript, and some.
 def clean_text(soup):
     for frame in soup(['style', 'script', 'head', 'meta', 'title', '[document]', 'code', 'blockquote', 'cite']):
         frame.extract()
     text = " ".join(re.findall(r'\w+', soup.get_text()))
-    sub_str = re.sub(u"([^\s.,';\u0030-\u0039\u0041-\u005a\u0061-\u007a])", "",text)
+    # only extract English, numbers, and some punctuation
+    sub_str = re.sub(u"([^\s.,';\u0030-\u0039\u0041-\u005a\u0061-\u007a])", "", text)
     return sub_str.strip()
 
 
@@ -46,21 +45,22 @@ def html_text(payload):
         else:
             pass
 
-
-    # Problem 2: Let's assume that we found a way to retrieve the text from a webpage. How can we recognize the
-    # entities in the text?
+# Problem 2: Let's assume that we found a way to retrieve the text from a webpage.
+# How can we recognize the entities in the text?
+# 
 
 
 def parse_document(document):
-   document = re.sub('\n', ' ', document)
-   if isinstance(document, str):
-       document = document
-   else:
-       raise ValueError('Document is not string!')
-   document = document.strip()
-   sentences = nltk.sent_tokenize(document)
-   sentences = [sentence.strip() for sentence in sentences]
-   return sentences
+    document = re.sub('\n', ' ', document)
+    if isinstance(document, str):
+        document = document
+    else:
+        raise ValueError('Document is not string!')
+    document = document.strip()
+    sentences = nltk.sent_tokenize(document)
+    sentences = [sentence.strip() for sentence in sentences]
+    return sentences
+
 
 # sample document
 def entity_detect(text):
@@ -73,12 +73,12 @@ def entity_detect(text):
     # extract all named entities
     named_entities = []
     for ne_tagged_sentence in ne_chunked_sents:
-       for tagged_tree in ne_tagged_sentence:
-           # extract only chunks having NE labels
-           if hasattr(tagged_tree, 'label'):
-               entity_name = ' '.join(c[0] for c in tagged_tree.leaves()) #get NE name
-               entity_type = tagged_tree.label() # get NE category
-               named_entities.append(entity_name)
+        for tagged_tree in ne_tagged_sentence:
+            # extract only chunks having NE labels
+            if hasattr(tagged_tree, 'label'):
+                entity_name = ' '.join(c[0] for c in tagged_tree.leaves())  # get NE name
+                entity_type = tagged_tree.label()  # get NE category
+                named_entities.append(entity_name)
 
     return named_entities
 
@@ -89,8 +89,8 @@ def entity_detect(text):
 # compare the similarity of html text and description, return the link of the best fit
 def compute_cosine(text_a, text_b):
     # look for words and their frequency
-    words_a = re.split(' |/',text_a)
-    words_b = re.split(' |/',text_b)
+    words_a = re.split(' |/', text_a)
+    words_b = re.split(' |/', text_b)
     words1 = list(set(words_a))
     words2 = list(set(words_b))
     words1_dict = {}
@@ -155,6 +155,7 @@ def compute_cosine(text_a, text_b):
         result = 0.0
     return result
 
+
 def similarity(text, descriptions):
     sim = {}
     try:
@@ -176,19 +177,16 @@ def search(query):
         if response:
             for hit in response['hits']['hits']:
                 label = "W"
-#                description = "L"
                 id = hit['_id']
                 if 'schema_name' in hit['_source']:
                     label = hit['_source']['schema_name']
-#                if 'schema_description' in hit['_source']:
-#                    description = hit['_source']['schema_description']
                 id_labels.setdefault(id, set()).add(str(label))
     except:
         id_labels = {}
         label = "W"
-#        description = "L"
         id_labels.setdefault('NULL in ES', set()).add(str(label))
     return id_labels
+
 
 def ent_link(page_id, entities):
     for ent in entities:
@@ -199,32 +197,11 @@ def ent_link(page_id, entities):
         if label_description:
             print(page_id + "\t" + ent.strip() + "\t" + similarity(ent, label_description))
 
-    # To tackle this problem, you have access to two tools that can be useful. The first is a SPARQL engine (Trident)
-    # with a local copy of Wikidata. The file "test_sparql.py" shows how you can execute SPARQL queries to retrieve
-    # valuable knowledge. Please be aware that a SPARQL engine is not the best tool in case you want to lookup for
-    # some strings. For this task, you can use elasticsearch, which is also installed in the docker image.
-    # The file start_elasticsearch_server.sh will start the elasticsearch server while the file
-    # test_elasticsearch_server.py shows how you can query the engine.
-
-    # A simple implementation would be to first query elasticsearch to retrieve all the entities with a label
-    # that is similar to the text found in the web page. Then, you can access the SPARQL engine to retrieve valuable
-    # knowledge that can help you to disambiguate the entity. For instance, if you know that the webpage refers to persons
-    # then you can query the knowledge base to filter out all the entities that are not persons...
-
-    # Obviously, more sophisticated implementations that the one suggested above are more than welcome :-)
-
-    # For now, we are cheating. We are going to returthe labels that we stored in sample-labels-cheat.txt
-    # Instead of doing that, you should process the text to identify the entities. Your implementation should return
-    # the discovered disambiguated entities with the same format so that I can check the performance of your program.
-
-    # cheats = dict((line.split('\t', 2) for line in open('data/sample-labels-cheat.txt').read().splitlines()))
-    # for label, wikidata_id in cheats.items():
-    #     if key and (label in payload):
-    #         yield key, label, wikidata_id
 
 def ner_link(page_text):
     entities = entity_detect(page_text[1])
     ent_link(page_text[0], entities)
+
 
 if __name__ == '__main__':
     try:
@@ -236,8 +213,8 @@ if __name__ == '__main__':
     # get the key_text
     KEYNAME = "WARC-TREC-ID"
     recID_text = []
-    
-    with gzip.open(INPUT,'rb') as warcRaw:
+
+    with gzip.open(INPUT, 'rb') as warcRaw:
         for record in ArchiveIterator(warcRaw):
             item = html_text(record)
             if item:
