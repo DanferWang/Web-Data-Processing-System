@@ -16,7 +16,7 @@ warnings.filterwarnings('ignore')
 # Problem 1: The webpage is typically encoded in HTML format.
 # We should get rid of the HTML tags and retrieve the text. How can we do it?
 
-
+# Only textual content shown in html is considered to process. Remove HTML head, CSS style, JavaScript, and some.
 def clean_text(text):
     sub_str = re.sub(u"([^\s.,';\u0030-\u0039\u0041-\u005a\u0061-\u007a])", "", text)
     return sub_str.strip()
@@ -56,16 +56,8 @@ class HiddenPrints:
 
 
 dataset = 'conll2003'
-# 'conll2003'
-# 'example_unannotated_texts'
-# 'i2b2_2014_deid'
 
 model = 'conll_2003_en'
-# 'conll_2003_en'
-# 'i2b2_2014_glove_spacy_bioes'
-# 'i2b2_2014_glove_stanford_bioes'
-# 'mimic_glove_spacy_bioes'
-# 'mimic_glove_stanford_bioes'
 
 with HiddenPrints():
     neuromodel.fetch_data(dataset)

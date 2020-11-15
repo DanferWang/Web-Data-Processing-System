@@ -8,16 +8,11 @@ import warnings
 import nltk
 from warcio.archiveiterator import ArchiveIterator
 from bs4 import BeautifulSoup
+from neuroner import neuromodel
 from elasticsearch import Elasticsearch
 from multiprocessing import Pool, cpu_count
 
 warnings.filterwarnings('ignore')
-
-nltk.download('averaged_perceptron_tagger')
-nltk.download('maxent_ne_chunker')
-nltk.download('words')
-nltk.download('punkt')
-
 
 # Problem 1: The webpage is typically encoded in HTML format.
 # We use beautiful soup to extract from html, and refine the raw text.
@@ -47,44 +42,43 @@ def html_text(payload):
 
 # Problem 2: Let's assume that we found a way to retrieve the text from a webpage.
 # How can we recognize the entities in the text?
-# 
+
+# After compare NLTK and NeuroNER for detect entities, we finally decide to use NLTK for better result and faster.
+
+class HiddenPrints:
+    # Prevent printing
+    def __enter__(self):
+        self._original_stdout = sys.stdout
+        sys.stdout = open(os.devnull, 'w')
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.stdout.close()
+        sys.stdout = self._original_stdout
 
 
-def parse_document(document):
-    document = re.sub('\n', ' ', document)
-    if isinstance(document, str):
-        document = document
-    else:
-        raise ValueError('Document is not string!')
-    document = document.strip()
-    sentences = nltk.sent_tokenize(document)
-    sentences = [sentence.strip() for sentence in sentences]
-    return sentences
+dataset = 'conll2003'
 
+model = 'conll_2003_en'
 
-# sample document
-def entity_detect(text):
-    # tokenize sentences
-    sentences = parse_document(text)
-    tokenized_sentences = [nltk.word_tokenize(sentence) for sentence in sentences]
-    # tag sentences and use nltk's Named Entity Chunker
-    tagged_sentences = [nltk.pos_tag(sentence) for sentence in tokenized_sentences]
-    ne_chunked_sents = [nltk.ne_chunk(tagged) for tagged in tagged_sentences]
-    # extract all named entities
-    named_entities = []
-    for ne_tagged_sentence in ne_chunked_sents:
-        for tagged_tree in ne_tagged_sentence:
-            # extract only chunks having NE labels
-            if hasattr(tagged_tree, 'label'):
-                entity_name = ' '.join(c[0] for c in tagged_tree.leaves())  # get NE name
-                entity_type = tagged_tree.label()  # get NE category
-                named_entities.append(entity_name)
+with HiddenPrints():
+    neuromodel.fetch_data(dataset)
+    neuromodel.fetch_model(model)
+    nn = neuromodel.NeuroNER(train_model=False, use_pretrained_model=True)
 
-    return named_entities
+# detect entities
+def entity_detect(sentence):
+    with HiddenPrints():
+        entity = nn.predict(sentence)
+    entities = []
+    for i in range(len(entity)):
+        entities.append(entity[i]['text'])
+    return entities
 
-    # Problem 3: We now have to disambiguate the entities in the text. For instance, let's assugme that we identified
-    # the entity "Michael Jordan". Which entity in Wikidata is the one that is referred to in the text?
+# Problem 3: We now have to disambiguate the entities in the text. For instance, let's assugme that we identified
+# the entity "Michael Jordan". Which entity in Wikidata is the one that is referred to in the text?
 
+# Using Elastic Search server to search in Wikidata about the entity we have detected, the candidates are tested similarity
+# with the entity schema_name or description, to pick the most related one to link.
 
 # compare the similarity of html text and description, return the link of the best fit
 def compute_cosine(text_a, text_b):
@@ -141,7 +135,7 @@ def compute_cosine(text_a, text_b):
         else:
             vect2.append(0)
 
-    # calculate cosine sim
+    # calculate cosine distance to represent similarity
     sum = 0
     sq1 = 0
     sq2 = 0
@@ -155,7 +149,7 @@ def compute_cosine(text_a, text_b):
         result = 0.0
     return result
 
-
+# execute the similarity test
 def similarity(text, descriptions):
     sim = {}
     try:
@@ -167,12 +161,12 @@ def similarity(text, descriptions):
         exc = "invalid text HTML"
         return exc
 
-
+# using Elastic Search to get the candidates of entity linking
 def search(query):
     e = Elasticsearch()
     p = {"query": {"query_string": {"query": query}}}
     try:
-        response = e.search(index="wikidata_en", body=json.dumps(p), request_timeout=60, size=30)
+        response = e.search(index="wikidata_en", body=json.dumps(p), request_timeout=60, size=20)
         id_labels = {}
         if response:
             for hit in response['hits']['hits']:
@@ -187,7 +181,7 @@ def search(query):
         id_labels.setdefault('NULL in ES', set()).add(str(label))
     return id_labels
 
-
+# link the entity with Wikidata url
 def ent_link(page_id, entities):
     for ent in entities:
         QUERY = ent
@@ -197,7 +191,7 @@ def ent_link(page_id, entities):
         if label_description:
             print(page_id + "\t" + ent.strip() + "\t" + similarity(ent, label_description))
 
-
+# pipelined procedures for parallel
 def ner_link(page_text):
     entities = entity_detect(page_text[1])
     ent_link(page_text[0], entities)
@@ -214,6 +208,7 @@ if __name__ == '__main__':
     KEYNAME = "WARC-TREC-ID"
     recID_text = []
 
+    # read the warc, extract, and refine
     with gzip.open(INPUT, 'rb') as warcRaw:
         for record in ArchiveIterator(warcRaw):
             item = html_text(record)
@@ -222,5 +217,6 @@ if __name__ == '__main__':
             if record.rec_headers.get_header(KEYNAME) == "clueweb12-0000tw-00-00092":
                 break
 
+    # run with multi-processing as parallel
     with Pool(cpu_count()) as p:
         p.map(ner_link, recID_text)
