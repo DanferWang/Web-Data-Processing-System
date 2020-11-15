@@ -14,9 +14,12 @@ elasticsearch
 multiprocessing
 neuroner
 
-Run the Shell script stater_code.sh:
-sh test_sample.sh
+
+Run the code with your WARC data:
+Open the Shell file your_WARC.sh, change [path to your WARC file] with the path of your WARC file and save. Then, change [annotation] with the path of annotation.tsv.
+sh your_WARC.sh
 It will directly run the proedure of linking and scoring on the sample. Then it will create file with the result of record_id, entity_name, and linking_page. Next, the evaluation criteria can be printed.
+
 
 Installation guide neuroner library:
 https://github.com/Franck-Dernoncourt/NeuroNER

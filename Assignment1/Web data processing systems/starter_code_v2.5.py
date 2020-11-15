@@ -205,7 +205,7 @@ if __name__ == '__main__':
         sys.exit(0)
 
     # get the key_text
-    KEYNAME = "WARC-TREC-ID"
+    KEYNAME = "WARC-Record-ID"
     recID_entities = []
 
     # read the warc, extract, and refine
@@ -215,8 +215,6 @@ if __name__ == '__main__':
             if item:
                 entities = entity_detect(item[1])
                 recID_entities.append([item[0], entities])
-            if record.rec_headers.get_header(KEYNAME) == "clueweb12-0000tw-00-00012":
-                break
                 
 
     # run with multi-processing as parallel
