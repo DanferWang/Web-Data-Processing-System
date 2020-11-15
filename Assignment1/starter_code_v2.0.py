@@ -17,8 +17,11 @@ warnings.filterwarnings('ignore')
 # We should get rid of the HTML tags and retrieve the text. How can we do it?
 
 
-def clean_text(text):
-    sub_str = re.sub(u"([^\s.,';\u0030-\u0039\u0041-\u005a\u0061-\u007a])", "", text)
+def clean_text(soup):
+    for frame in soup(['style', 'script', 'head', 'meta', 'title', '[document]', 'code', 'blockquote', 'cite']):
+        frame.extract()
+    text = " ".join(re.findall(r'\w+', soup.get_text()))
+    sub_str = re.sub(u"([^\s.,';\u0030-\u0039\u0041-\u005a\u0061-\u007a])", "",text)
     return sub_str.strip()
 
 
@@ -28,16 +31,12 @@ def html_text(payload):
         key = payload.rec_headers.get_header(KEYNAME)
         content = payload.content_stream().read()
         soup = BeautifulSoup(content, "lxml")
-        text_list = [clean_text(text) for text in soup.stripped_strings]
-        if "XMLRPC server accepts POST requests only." not in text_list:
-            text_set = set(text_list)
-            text_list = list(text_set)
-            text_list = list(filter(None, text_list))
-            if text_list:
-                id_text = [key, text_list]
-                return id_text
-            else:
-                pass
+        text = clean_text(soup)
+        if "XML RPC server accepts POST requests only" not in text:
+            id_text = [key, text]
+            return id_text
+        else:
+            pass
 
 
     # Problem 2: Let's assume that we found a way to retrieve the text from a webpage. How can we recognize the
@@ -71,7 +70,7 @@ with HiddenPrints():
     neuromodel.fetch_data(dataset)
     neuromodel.fetch_model(model)
     nn = neuromodel.NeuroNER(train_model=False, use_pretrained_model=True)
-
+   
 # detect entities
 def entity_detect(sentence):
     with HiddenPrints():
@@ -233,10 +232,10 @@ if __name__ == '__main__':
         sys.exit(0)
 
     # get the key_text
-    KEYNAME = "WARC-Record-ID"
+    KEYNAME = "WARC-TREC-ID"
     recID_text = []
-
-    with gzip.open(INPUT, 'rt', errors='ignore') as warcRaw:
+    
+    with gzip.open(INPUT,'rb') as warcRaw:
         for record in ArchiveIterator(warcRaw):
             item = html_text(record)
             if item:

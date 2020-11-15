@@ -5,20 +5,31 @@ import re
 import math
 import os, sys
 import warnings
+import pandas as pd
+import nltk
 from warcio.archiveiterator import ArchiveIterator
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
-from neuroner import neuromodel
 from elasticsearch import Elasticsearch
 from multiprocessing import Pool, cpu_count
 
+
 warnings.filterwarnings('ignore')
+
+nltk.download('averaged_perceptron_tagger')
+nltk.download('maxent_ne_chunker')
+nltk.download('words')
+nltk.download('punkt')
+
 # Problem 1: The webpage is typically encoded in HTML format.
 # We should get rid of the HTML tags and retrieve the text. How can we do it?
 
 
-def clean_text(text):
-    sub_str = re.sub(u"([^\s.,';\u0030-\u0039\u0041-\u005a\u0061-\u007a])", "", text)
+def clean_text(soup):
+    for frame in soup(['style', 'script', 'head', 'meta', 'title', '[document]', 'code', 'blockquote', 'cite']):
+        frame.extract()
+    text = " ".join(re.findall(r'\w+', soup.get_text()))
+    sub_str = re.sub(u"([^\s.,';\u0030-\u0039\u0041-\u005a\u0061-\u007a])", "",text)
     return sub_str.strip()
 
 
@@ -28,58 +39,48 @@ def html_text(payload):
         key = payload.rec_headers.get_header(KEYNAME)
         content = payload.content_stream().read()
         soup = BeautifulSoup(content, "lxml")
-        text_list = [clean_text(text) for text in soup.stripped_strings]
-        if "XMLRPC server accepts POST requests only." not in text_list:
-            text_set = set(text_list)
-            text_list = list(text_set)
-            text_list = list(filter(None, text_list))
-            if text_list:
-                id_text = [key, text_list]
-                return id_text
-            else:
-                pass
+        text = clean_text(soup)
+        if "XML RPC server accepts POST requests only" not in text:
+            id_text = [key, text]
+            return id_text
+        else:
+            pass
 
 
     # Problem 2: Let's assume that we found a way to retrieve the text from a webpage. How can we recognize the
     # entities in the text?
 
 
-class HiddenPrints:
-    # Prevent printing
-    def __enter__(self):
-        self._original_stdout = sys.stdout
-        sys.stdout = open(os.devnull, 'w')
+def parse_document(document):
+   document = re.sub('\n', ' ', document)
+   if isinstance(document, str):
+       document = document
+   else:
+       raise ValueError('Document is not string!')
+   document = document.strip()
+   sentences = nltk.sent_tokenize(document)
+   sentences = [sentence.strip() for sentence in sentences]
+   return sentences
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        sys.stdout.close()
-        sys.stdout = self._original_stdout
+# sample document
+def entity_detect(text):
+    # tokenize sentences
+    sentences = parse_document(text)
+    tokenized_sentences = [nltk.word_tokenize(sentence) for sentence in sentences]
+    # tag sentences and use nltk's Named Entity Chunker
+    tagged_sentences = [nltk.pos_tag(sentence) for sentence in tokenized_sentences]
+    ne_chunked_sents = [nltk.ne_chunk(tagged) for tagged in tagged_sentences]
+    # extract all named entities
+    named_entities = []
+    for ne_tagged_sentence in ne_chunked_sents:
+       for tagged_tree in ne_tagged_sentence:
+           # extract only chunks having NE labels
+           if hasattr(tagged_tree, 'label'):
+               entity_name = ' '.join(c[0] for c in tagged_tree.leaves()) #get NE name
+               entity_type = tagged_tree.label() # get NE category
+               named_entities.append(entity_name)
 
-
-dataset = 'conll2003'
-# 'conll2003'
-# 'example_unannotated_texts'
-# 'i2b2_2014_deid'
-
-model = 'conll_2003_en'
-# 'conll_2003_en'
-# 'i2b2_2014_glove_spacy_bioes'
-# 'i2b2_2014_glove_stanford_bioes'
-# 'mimic_glove_spacy_bioes'
-# 'mimic_glove_stanford_bioes'
-
-with HiddenPrints():
-    neuromodel.fetch_data(dataset)
-    neuromodel.fetch_model(model)
-    nn = neuromodel.NeuroNER(train_model=False, use_pretrained_model=True)
-
-# detect entities
-def entity_detect(sentence):
-    with HiddenPrints():
-        entity = nn.predict(sentence)
-    entities = []
-    for i in range(len(entity)):
-        entities.append(entity[i]['text'])
-    return entities
+    return named_entities
 
     # Problem 3: We now have to disambiguate the entities in the text. For instance, let's assugme that we identified
     # the entity "Michael Jordan". Which entity in Wikidata is the one that is referred to in the text?
@@ -233,10 +234,10 @@ if __name__ == '__main__':
         sys.exit(0)
 
     # get the key_text
-    KEYNAME = "WARC-Record-ID"
+    KEYNAME = "WARC-TREC-ID"
     recID_text = []
-
-    with gzip.open(INPUT, 'rt', errors='ignore') as warcRaw:
+    
+    with gzip.open(INPUT,'rb') as warcRaw:
         for record in ArchiveIterator(warcRaw):
             item = html_text(record)
             if item:
