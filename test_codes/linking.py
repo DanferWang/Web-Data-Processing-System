@@ -21,18 +21,24 @@ def similarity(text, descriptions):
 def search(query):
     e = Elasticsearch()
     p = {"query": {"query_string": {"query": query}}}
-    response = e.search(index="wikidata_en", body=json.dumps(p), request_timeout=60)
-    id_labels = {}
-    if response:
-        for hit in response['hits']['hits']:
-            label = "W"
-            description = "L"
-            id = hit['_id']
-            if 'schema_name' in hit['_source']:
-                label = hit['_source']['schema_name']
-            if 'schema_description' in hit['_source']:
-                description = hit['_source']['schema_description']
-            id_labels.setdefault(id, set()).add(str(label) + " " + str(description))
+    try:
+        response = e.search(index="wikidata_en", body=json.dumps(p), request_timeout=60)
+        id_labels = {}
+        if response:
+            for hit in response['hits']['hits']:
+                label = "W"
+                description = "L"
+                id = hit['_id']
+                if 'schema_name' in hit['_source']:
+                    label = hit['_source']['schema_name']
+                if 'schema_description' in hit['_source']:
+                    description = hit['_source']['schema_description']
+                id_labels.setdefault(id, set()).add(str(label) + " " + str(description))
+    except:
+        id_labels = {}
+        label = "W"
+        description = "L"
+        id_labels.setdefault('NULL in ES', set()).add(str(label) + " " + str(description))
     return id_labels
 
 
@@ -45,12 +51,10 @@ if __name__ == '__main__':
         #sp = i.split(":")[2].replace(">", "")
         for k in recID_entities.get(i):
             QUERY = k
-            # print(k)
             mylist = []
             for entity in search(QUERY).keys():
                 mylist.append([entity, str(search(QUERY)[entity])])
-            # print(mylist)
             if mylist:
-                html_text = " ".join(rec_text[i])
-                print(i + "\t" + k + "\t" + similarity(html_text, mylist))
+                html_text = rec_text[i]
+                print(i + "\t" + k + "\t" + similarity(QUERY, mylist))
 

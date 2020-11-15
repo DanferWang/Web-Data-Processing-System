@@ -50,8 +50,7 @@ if __name__ == '__main__':
         rec_text = json.load(load_f)
     recID_entities = {}
     for i in rec_text.keys():
-        strx = ' '
-        strxNew = strx.join(rec_text.get(i))
+        strxNew = rec_text.get(i)
         recID_entities[i] = entity_detect(strxNew)
     with open("en93.json",'w') as out:
         json.dump(recID_entities,out)
